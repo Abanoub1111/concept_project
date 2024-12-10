@@ -7,62 +7,203 @@ import tkinter as tk
 import tkinter.messagebox as messagebox
 from typing import Tuple
 
+def my_sorted(iterable, key=None):
+    def bubble_sort(arr, n, i=0):
+        if n == 1:
+            return arr
+        if i == n - 1:
+            return bubble_sort(arr, n - 1)  # Reduce the problem size
+        # Swap if needed
+        if (key(arr[i]) if key else arr[i]) > (key(arr[i + 1]) if key else arr[i + 1]):
+            arr[i], arr[i + 1] = arr[i + 1], arr[i]
+
+        # Recurse to the next element
+        return bubble_sort(arr, n, i + 1)
+    return bubble_sort(iterable[:], len(iterable))  # Start sorting with a copy of the original list
+
 
 @dataclass(frozen=True)
 class Task:
-    """Immutable task representation using functional principles."""
     task_id: str
     description: str
     due_date: datetime
     priority: int
     status: str = "Pending"
 
+
 class TaskManager:
-    """Functional task management with immutable operations."""
     TASKS_FILE = "tasks.json"
 
-    @staticmethod
+    def add_task(tasks: List[Task], description: str, due_date: datetime, priority: int) -> Tuple[List[Task], Optional[Task]]:
+        new_task = Task(f"T{len(tasks) + 1}", description, due_date, priority)
+        
+        # Validate the task
+        validation_error = TaskManager.validate_task(new_task)
+        if validation_error:
+            return tasks, None
+
+        # Add task to the list
+        tasks.append(new_task)
+        TaskManager.renumber_tasks(tasks)
+        TaskManager.save_tasks(tasks)
+        
+        return tasks, new_task
+
+    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any]) -> Tuple[List[Task], Optional[Task]]:
+        
+        def update_recursively(tasks, task_id, updates, index=0, updated_task=None):
+            # Base case
+            if not tasks:
+                return tasks, updated_task
+
+            # Check if the current task matches the task_id
+            current_task = tasks[0]
+            if current_task.task_id == task_id:
+                # Apply the updates if task_id matches
+                updated_task = replace(
+                    current_task,
+                    description=updates.get("description", current_task.description),
+                    due_date=updates.get("due_date", current_task.due_date),
+                    priority=updates.get("priority", current_task.priority),
+                    status=updates.get("status", current_task.status)
+                )
+                # Update the task in the list
+                tasks[0] = updated_task
+                return tasks, updated_task  # Return the updated tasks and task
+            
+            # Recurse on the rest of the list
+            updated_tasks, updated_task = update_recursively(tasks[1:], task_id, updates, index + 1, updated_task)
+            # Rebuild the list by adding the updated first task back in
+            return [tasks[0]] + updated_tasks, updated_task
+
+        # Start the recursion
+        updated_tasks, updated_task = update_recursively(tasks, task_id, updates)
+        
+        TaskManager.save_tasks(updated_tasks)
+        return updated_tasks, updated_task
+
+    def delete_task(tasks: List[Task], task_id: str) -> List[Task]:
+        
+        def delete_recursively(tasks, task_id, result=[]):
+            # Base case
+            if not tasks:
+                TaskManager.renumber_tasks(result)
+                TaskManager.save_tasks(result)
+                return result
+
+            # Get the first task
+            task = tasks[0]
+
+            # If task_id doesn't match, keep the task in the result
+            if task.task_id != task_id:
+                result.append(task)
+
+            # Recurse with the remaining tasks
+            return delete_recursively(tasks[1:], task_id, result)
+
+        # Start the recursion with the full list of tasks
+        return delete_recursively(tasks, task_id)
+
+    def filter_tasks(tasks: List[Task], filter_by: str) -> List[Task]:
+        
+        def filter_recursively(tasks, filter_by, filtered_tasks=[]):
+            # Base case
+            if not tasks:
+                return filtered_tasks
+
+            # Get the first task
+            task = tasks[0]
+
+            # Apply the filter criteria
+            match filter_by:
+                case "Pending":
+                    if task.status == "Pending":
+                        filtered_tasks.append(task)
+                case "Completed":
+                    if task.status == "Completed":
+                        filtered_tasks.append(task)
+                case "Overdue":
+                    if task.status == "Overdue":
+                        filtered_tasks.append(task)
+                case _:
+                    filtered_tasks.append(task)  # Return all tasks if no match
+
+            # Recursively process the rest of the tasks
+            return filter_recursively(tasks[1:], filter_by, filtered_tasks)
+
+        # Start the recursion with the full list of tasks
+        return filter_recursively(tasks, filter_by)
+
+    def sort_tasks(tasks: List[Task], sort_by: str) -> List[Task]:
+        match sort_by:
+            case "Priority":
+                return my_sorted(tasks, key=lambda task: task.priority)
+            case "Due Date":
+                return my_sorted(tasks, key=lambda task: task.due_date)
+            case _:
+                return tasks
+
     def load_tasks() -> List[Task]:
-        """Purely functional task loading with error handling."""
+        """Purely functional task loading with error handling using recursion."""
         try:
             if not os.path.exists(TaskManager.TASKS_FILE):
                 return []
-            
+
             with open(TaskManager.TASKS_FILE, 'r') as f:
                 task_dicts = json.load(f)
-                return [
-                    Task(
+                
+                def create_task_from_dict(task_dicts, tasks=[]):
+                    # Base case
+                    if not task_dicts:
+                        return tasks
+                    
+                    # Process the first task_dict and create a Task
+                    task_dict = task_dicts[0]
+                    task = Task(
                         task_id=task_dict["task_id"],
                         description=task_dict["description"],
                         due_date=datetime.strptime(task_dict["due_date"], "%Y-%m-%d %H:%M:%S"),
                         priority=task_dict["priority"],
                         status=task_dict["status"]
                     )
-                    for task_dict in task_dicts
-                ]
+                    
+                    # Recurse on the remaining task_dicts
+                    return create_task_from_dict(task_dicts[1:], tasks + [task])
+
+                # Start recursion with the list of task_dicts
+                return create_task_from_dict(task_dicts)
+
         except (json.JSONDecodeError, KeyError, FileNotFoundError):
             return []
 
-    @staticmethod
     def save_tasks(tasks: List[Task]) -> None:
-        """Purely functional task saving."""
-        task_dicts = [
-            {
+        
+        def build_task_dicts(tasks, task_dicts=[]):
+            # Base case
+            if not tasks:
+                return task_dicts
+
+            # Extract the first task and create the corresponding dictionary
+            task = tasks[0]
+            task_dict = {
                 "task_id": task.task_id,
                 "description": task.description,
                 "due_date": task.due_date.strftime("%Y-%m-%d %H:%M:%S"),
                 "priority": task.priority,
                 "status": task.status
             }
-            for task in tasks
-        ]
+
+            # Recurse on the remaining tasks, appending the current task's dictionary
+            return build_task_dicts(tasks[1:], task_dicts + [task_dict])
+
+        # Start the recursion
+        task_dicts = build_task_dicts(tasks)
         
+        # Write to the file
         with open(TaskManager.TASKS_FILE, 'w') as f:
             json.dump(task_dicts, f, indent=2)
 
-    @staticmethod
     def validate_task(task: Task) -> Optional[str]:
-        """Validate task with functional error handling."""
         if task.priority < 1 or task.priority > 10:
             return "Priority must be between 1 and 10!"
         
@@ -71,86 +212,16 @@ class TaskManager:
         
         return None
 
-    @staticmethod
-    def renumber_tasks(tasks: List[Task]) -> List[Task]:
-        """Create a new list of tasks with renumbered IDs."""
-        return [
-            replace(task, task_id=f"T{index + 1}")
-            for index, task in enumerate(tasks)
-        ]
+    def renumber_tasks(tasks: List[Task], index: int = 0) -> None:
+        if index == len(tasks):  # Base case
+            return
+        task = replace(tasks[index], task_id=f"T{index + 1}")
+        tasks[index] = task  # Update the task in the list
+        TaskManager.renumber_tasks(tasks, index + 1)  # Recursively renumber the next task
 
-    @staticmethod
-    def add_task(tasks: List[Task], description: str, due_date: datetime, priority: int) -> Tuple[List[Task], Optional[Task]]:
-        """Functional task addition with pure operations."""
-        new_task = Task(f"T{len(tasks) + 1}", description, due_date, priority)
-        
-        # Validate the task
-        validation_error = TaskManager.validate_task(new_task)
-        if validation_error:
-            return tasks, None
-
-        # Add task and renumber
-        updated_tasks = TaskManager.renumber_tasks(tasks + [new_task])
-        TaskManager.save_tasks(updated_tasks)
-        
-        return updated_tasks, new_task
-
-    @staticmethod
-    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any]) -> Tuple[List[Task], Optional[Task]]:
-        """Functional task update with immutable operations."""
-        def update_single_task(task: Task) -> Task:
-            if task.task_id == task_id:
-                updated_task = replace(task, 
-                    description=updates.get("description", task.description),
-                    due_date=updates.get("due_date", task.due_date),
-                    priority=updates.get("priority", task.priority),
-                    status=updates.get("status", task.status)
-                )
-                return updated_task
-            return task
-
-        updated_tasks = list(map(update_single_task, tasks))
-        TaskManager.save_tasks(updated_tasks)
-        
-        # Find the updated task
-        updated_task = next((task for task in updated_tasks if task.task_id == task_id), None)
-        return updated_tasks, updated_task
-
-    @staticmethod
-    def delete_task(tasks: List[Task], task_id: str) -> List[Task]:
-        """Functional task deletion with filter."""
-        updated_tasks = list(filter(lambda task: task.task_id != task_id, tasks))
-        updated_tasks = TaskManager.renumber_tasks(updated_tasks)
-        TaskManager.save_tasks(updated_tasks)
-        return updated_tasks
-
-    @staticmethod
-    def filter_tasks(tasks: List[Task], filter_by: str) -> List[Task]:
-        """Filter tasks based on the provided filter criteria using match."""
-        match filter_by:
-            case "Pending":
-                return [task for task in tasks if task.status == "Pending"]
-            case "Completed":
-                return [task for task in tasks if task.status == "Completed"]
-            case "Overdue":
-                return [task for task in tasks if task.status == "Overdue"]
-            case _:
-                return tasks  # Return all tasks if no match
-
-
-    @staticmethod
-    def sort_tasks(tasks: List[Task], sort_by: str) -> List[Task]:
-        """Sort tasks based on the provided sort criteria using match."""
-        match sort_by:
-            case "Priority":
-                return sorted(tasks, key=lambda task: task.priority)
-            case "Due Date":
-                return sorted(tasks, key=lambda task: task.due_date)
-            case _:
-                return tasks  # Return tasks as is if no match
 
 class TaskPlannerGUI:
-    """Refactored GUI with more functional approach."""
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Functional Task Planner")
@@ -234,8 +305,6 @@ class TaskPlannerGUI:
         )
         filter_dropdown.grid(row=7, column=1, padx=10, pady=10)
 
-
-
     def apply_sort(self, sort_by: str):
         """Apply sorting to tasks based on user selection."""
         if sort_by == "All":  # Default or no sorting
@@ -251,7 +320,6 @@ class TaskPlannerGUI:
         else:
             self.tasks = TaskManager.filter_tasks(TaskManager.load_tasks(), filter_by)
         self.refresh_task_list()
-
 
     def refresh_task_list(self):
         """Functional task list refresh."""
@@ -353,8 +421,8 @@ class TaskPlannerGUI:
         """Start the GUI event loop."""
         self.root.mainloop()
 
+
 def main():
-    """Main entry point with functional design."""
     TaskPlannerGUI().run()
 
 if __name__ == "__main__":

@@ -1,349 +1,361 @@
 import os
 import json
-from dataclasses import dataclass, field
-from typing import List, Dict
+from dataclasses import dataclass, replace
+from typing import List, Dict, Optional
 from datetime import datetime
 import tkinter as tk
-from functools import partial
 import tkinter.messagebox as messagebox
+from typing import Tuple
 
-@dataclass
+
+@dataclass(frozen=True)
 class Task:
-    """Represents a task with various attributes."""
+    """Immutable task representation using functional principles."""
     task_id: str
     description: str
     due_date: datetime
     priority: int
     status: str = "Pending"
 
-TASKS_FILE = "tasks.json"
+class TaskManager:
+    """Functional task management with immutable operations."""
+    TASKS_FILE = "tasks.json"
 
-def get_tasks_from_json():
-    """Retrieve tasks from the JSON file."""
-    if not os.path.exists(TASKS_FILE):
-        return []
-    
-    with open(TASKS_FILE, 'r') as f:
+    @staticmethod
+    def load_tasks() -> List[Task]:
+        """Purely functional task loading with error handling."""
         try:
-            task_dicts = json.load(f)
-            return [
-                Task(
-                    task_id=task_dict["task_id"],
-                    description=task_dict["description"],
-                    due_date=datetime.strptime(task_dict["due_date"], "%Y-%m-%d %H:%M:%S"),
-                    priority=task_dict["priority"],
-                    status=task_dict["status"]
-                )
-                for task_dict in task_dicts
-            ]
-        except (json.JSONDecodeError, KeyError):
+            if not os.path.exists(TaskManager.TASKS_FILE):
+                return []
+            
+            with open(TaskManager.TASKS_FILE, 'r') as f:
+                task_dicts = json.load(f)
+                return [
+                    Task(
+                        task_id=task_dict["task_id"],
+                        description=task_dict["description"],
+                        due_date=datetime.strptime(task_dict["due_date"], "%Y-%m-%d %H:%M:%S"),
+                        priority=task_dict["priority"],
+                        status=task_dict["status"]
+                    )
+                    for task_dict in task_dicts
+                ]
+        except (json.JSONDecodeError, KeyError, FileNotFoundError):
             return []
 
-def save_tasks_to_json(tasks: List[Task]):
+    @staticmethod
+    def save_tasks(tasks: List[Task]) -> None:
+        """Purely functional task saving."""
+        task_dicts = [
+            {
+                "task_id": task.task_id,
+                "description": task.description,
+                "due_date": task.due_date.strftime("%Y-%m-%d %H:%M:%S"),
+                "priority": task.priority,
+                "status": task.status
+            }
+            for task in tasks
+        ]
+        
+        with open(TaskManager.TASKS_FILE, 'w') as f:
+            json.dump(task_dicts, f, indent=2)
 
-    """Save tasks to the JSON file."""
-    task_dicts = [
-        {
-            "task_id": task.task_id,
-            "description": task.description,
-            "due_date": task.due_date.strftime("%Y-%m-%d %H:%M:%S"),
-            "priority": task.priority,
-            "status": task.status
-        }
-        for task in tasks
-    ]
-    
-    with open(TASKS_FILE, 'w') as f:
-        json.dump(task_dicts, f, indent=2)
+    @staticmethod
+    def validate_task(task: Task) -> Optional[str]:
+        """Validate task with functional error handling."""
+        if task.priority < 1 or task.priority > 10:
+            return "Priority must be between 1 and 10!"
+        
+        if task.due_date <= datetime.now():
+            return "Due date must be in the future!"
+        
+        return None
 
-def renumber_tasks(tasks: List[Task]):
-    """Renumber tasks sequentially starting from T1."""
-    for index, task in enumerate(tasks):
-        task.task_id = f"T{index + 1}"
+    @staticmethod
+    def renumber_tasks(tasks: List[Task]) -> List[Task]:
+        """Create a new list of tasks with renumbered IDs."""
+        return [
+            replace(task, task_id=f"T{index + 1}")
+            for index, task in enumerate(tasks)
+        ]
 
-def add_task(description: str, due_date: datetime, priority: int) -> Task:
-    """Add a new task to the JSON file."""
-    
-    # Validate the priority
-    if priority < 1 or priority > 10:
-        raise ValueError("Priority must be between 1 and 10!")
+    @staticmethod
+    def add_task(tasks: List[Task], description: str, due_date: datetime, priority: int) -> Tuple[List[Task], Optional[Task]]:
+        """Functional task addition with pure operations."""
+        new_task = Task(f"T{len(tasks) + 1}", description, due_date, priority)
+        
+        # Validate the task
+        validation_error = TaskManager.validate_task(new_task)
+        if validation_error:
+            return tasks, None
 
-    # Validate the due date is in the future
-    if due_date <= datetime.now():
-        raise ValueError("Due date must be in the future!")
+        # Add task and renumber
+        updated_tasks = TaskManager.renumber_tasks(tasks + [new_task])
+        TaskManager.save_tasks(updated_tasks)
+        
+        return updated_tasks, new_task
 
-    # Get existing tasks
-    tasks = get_tasks_from_json()
-    
-    # Generate new task ID
-    new_task = Task(f"T{len(tasks) + 1}", description, due_date, priority)
+    @staticmethod
+    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any]) -> Tuple[List[Task], Optional[Task]]:
+        """Functional task update with immutable operations."""
+        def update_single_task(task: Task) -> Task:
+            if task.task_id == task_id:
+                updated_task = replace(task, 
+                    description=updates.get("description", task.description),
+                    due_date=updates.get("due_date", task.due_date),
+                    priority=updates.get("priority", task.priority),
+                    status=updates.get("status", task.status)
+                )
+                return updated_task
+            return task
 
-    # Add to existing tasks
-    tasks.append(new_task)
+        updated_tasks = list(map(update_single_task, tasks))
+        TaskManager.save_tasks(updated_tasks)
+        
+        # Find the updated task
+        updated_task = next((task for task in updated_tasks if task.task_id == task_id), None)
+        return updated_tasks, updated_task
 
-    renumber_tasks(tasks)
-    
-    # Save updated tasks
-    save_tasks_to_json(tasks)
-    
-    return new_task
+    @staticmethod
+    def delete_task(tasks: List[Task], task_id: str) -> List[Task]:
+        """Functional task deletion with filter."""
+        updated_tasks = list(filter(lambda task: task.task_id != task_id, tasks))
+        updated_tasks = TaskManager.renumber_tasks(updated_tasks)
+        TaskManager.save_tasks(updated_tasks)
+        return updated_tasks
 
-
-def update_task(task_id: str, updates: Dict[str, any]) -> Task:
-    """Update specific attributes of a task in the JSON file."""
-    tasks = get_tasks_from_json()
-    updated_task = None
-
-    for task in tasks:
-        if task.task_id == task_id:
-            # Update only specified attributes
-            updated_task = Task(
-                task_id=task.task_id,
-                description=updates.get("description", task.description),
-                due_date=updates.get("due_date", task.due_date),
-                priority=updates.get("priority", task.priority),
-                status=updates.get("status", task.status)
-            )
-            tasks[tasks.index(task)] = updated_task
-            break
-
-    save_tasks_to_json(tasks)
-    return updated_task
-
-
-def delete_task(task_id: str):
-    """Delete a task from the JSON file."""
-    # Get existing tasks
-    tasks = get_tasks_from_json()
-    
-    # Remove the task
-    updated_tasks = [task for task in tasks if task.task_id != task_id]
-
-    renumber_tasks(updated_tasks)
-
-    # Save updated tasks
-    save_tasks_to_json(updated_tasks)
-
-def run_task_planner_gui():
-    root = tk.Tk()
-    root.title("Task Planner")
-
-    # Tasks list and listbox setup
-    task_description_label = tk.Label(root, text="Task Description:")
-    task_description_label.grid(row=0, column=1, padx=10, pady=5, sticky="W")
-    task_description_entry = tk.Entry(root)
-    task_description_entry.grid(row=1, column=1, padx=10, pady=5)
-
-    task_due_date_label = tk.Label(root, text="Due Date (YYYY-MM-DD):")
-    task_due_date_label.grid(row=2, column=1, padx=10, pady=5, sticky="W")
-    task_due_date_entry = tk.Entry(root)
-    task_due_date_entry.grid(row=3, column=1, padx=10, pady=5)
-
-    task_priority_label = tk.Label(root, text="Priority:")
-    task_priority_label.grid(row=4, column=1, padx=10, pady=5, sticky="W")
-    task_priority_entry = tk.Entry(root)
-    task_priority_entry.grid(row=5, column=1, padx=10, pady=5)
-
-    task_listbox = tk.Listbox(root, width=50)
-    task_listbox.grid(row=0, column=0, padx=10, pady=10, rowspan=6)
-
-    def refresh_task_list():
-        """Refresh the task listbox from the JSON file."""
-        tasks = get_tasks_from_json()
-        task_listbox.delete(0, tk.END)
-        for task in tasks:
-            task_listbox.insert(tk.END, f"{task.task_id} - {task.description} (Due: {task.due_date.strftime('%Y-%m-%d')}, Priority: {task.priority}, Status: {task.status})")
-    def add_task_handler():
-        try:
-            description = task_description_entry.get()
-
-            # Parse the due date
-            due_date_str = task_due_date_entry.get()
-            due_date = datetime.strptime(due_date_str, "%Y-%m-%d")
-
-            # Parse the priority
-            priority_str = task_priority_entry.get()
-            priority = int(priority_str)
-            
-            # Call add_task which now has validation
-            add_task(description, due_date, priority)
-            
-            # Clear input fields after adding the task
-            task_description_entry.delete(0, tk.END)
-            task_due_date_entry.delete(0, tk.END)
-            task_priority_entry.delete(0, tk.END)
-            
-            # Refresh the task list
-            refresh_task_list()
-        except ValueError as e:
-            # Show an error message if validation fails
-            messagebox.showerror("Error", str(e))
-
-
-    def delete_task_handler():
-        selected = task_listbox.curselection()
-        if selected:
-            tasks = get_tasks_from_json()
-            task_id = tasks[selected[0]].task_id
-            delete_task(task_id)
-            refresh_task_list()
-
-    def update_task_handler():
-        """Open a window to update a selected task."""
-        selected = task_listbox.curselection()
-        if not selected:
-            tk.messagebox.showerror("Error", "No task selected!")
-            return
-
-        tasks = get_tasks_from_json()
-        task_id = tasks[selected[0]].task_id
-
-        # Create a new modal window for updating the task
-        update_window = tk.Toplevel(root)
-        update_window.title("Update Task")
-
-        # Update fields
-        update_description_label = tk.Label(update_window, text="Update Description:")
-        update_description_label.grid(row=0, column=0, padx=10, pady=5, sticky="W")
-        update_description_entry = tk.Entry(update_window, width=30)
-        update_description_entry.grid(row=0, column=1, padx=10, pady=5)
-
-        update_due_date_label = tk.Label(update_window, text="Update Due Date (YYYY-MM-DD):")
-        update_due_date_label.grid(row=1, column=0, padx=10, pady=5, sticky="W")
-        update_due_date_entry = tk.Entry(update_window, width=30)
-        update_due_date_entry.grid(row=1, column=1, padx=10, pady=5)
-
-        update_priority_label = tk.Label(update_window, text="Update Priority:")
-        update_priority_label.grid(row=2, column=0, padx=10, pady=5, sticky="W")
-        update_priority_entry = tk.Entry(update_window, width=30)
-        update_priority_entry.grid(row=2, column=1, padx=10, pady=5)
-
-        update_status_label = tk.Label(update_window, text="Update Status:")
-        update_status_label.grid(row=3, column=0, padx=10, pady=5, sticky="W")
-        update_status_var = tk.StringVar(update_window)
-        update_status_var.set("Select Status")
-        update_status_dropdown = tk.OptionMenu(update_window, update_status_var, "Pending", "Completed", "Overdue")
-        update_status_dropdown.grid(row=3, column=1, padx=10, pady=5)
-
-        def submit_update():
-            updates = {}
-            if update_description_entry.get():
-                updates["description"] = update_description_entry.get()
-            if update_due_date_entry.get():
-                try:
-                    updates["due_date"] = datetime.strptime(update_due_date_entry.get(), "%Y-%m-%d")
-                except ValueError:
-                    tk.messagebox.showerror("Error", "Invalid date format!")
-                    return
-            if update_priority_entry.get():
-                try:
-                    updates["priority"] = int(update_priority_entry.get())
-                except ValueError:
-                    tk.messagebox.showerror("Error", "Priority must be an integer!")
-                    return
-            if update_status_var.get() != "Select Status":
-                updates["status"] = update_status_var.get()
-
-            if not updates:
-                tk.messagebox.showerror("Error", "No updates provided!")
-                return
-
-            update_task(task_id, updates)
-            refresh_task_list()
-            update_window.destroy()
-
-        submit_button = tk.Button(update_window, text="Submit Update", command=submit_update)
-        submit_button.grid(row=4, column=0, columnspan=2, pady=10)
-
-    def filter_tasks_by_status(selected_status: str):
-        """Filter tasks based on the selected status using pattern matching."""
-        tasks = get_tasks_from_json()
-
-        match selected_status:
-            case "All":
-                filtered_tasks = tasks
-            case "Filter by Pending":
-                filtered_tasks = [task for task in tasks if task.status == "Pending"]
-            case "Filter by Completed":
-                filtered_tasks = [task for task in tasks if task.status == "Completed"]
-            case "Filter by Overdue":
-                filtered_tasks = [task for task in tasks if task.status == "Overdue"]
+    @staticmethod
+    def filter_tasks(tasks: List[Task], filter_by: str) -> List[Task]:
+        """Filter tasks based on the provided filter criteria using match."""
+        match filter_by:
+            case "Pending":
+                return [task for task in tasks if task.status == "Pending"]
+            case "Completed":
+                return [task for task in tasks if task.status == "Completed"]
+            case "Overdue":
+                return [task for task in tasks if task.status == "Overdue"]
             case _:
-                filtered_tasks = tasks
+                return tasks  # Return all tasks if no match
 
-        task_listbox.delete(0, tk.END)
-        for task in filtered_tasks:
-            task_listbox.insert(
-                tk.END,
-                f"{task.task_id} - {task.description} (Due: {task.due_date.strftime('%Y-%m-%d')}, Priority: {task.priority}, Status: {task.status})"
-            )
 
-    def sort_tasks_by_criteria(selected_criteria: str):
-        """Sort tasks based on the selected criteria using pattern matching."""
-        tasks = get_tasks_from_json()
-
-        match selected_criteria:
-            case "All":
-                sorted_tasks = tasks
-            case "Sort by Priority":
-                sorted_tasks = sorted(tasks, key=lambda task: task.priority)
-            case "Sort by Due Date":
-                sorted_tasks = sorted(tasks, key=lambda task: task.due_date)
+    @staticmethod
+    def sort_tasks(tasks: List[Task], sort_by: str) -> List[Task]:
+        """Sort tasks based on the provided sort criteria using match."""
+        match sort_by:
+            case "Priority":
+                return sorted(tasks, key=lambda task: task.priority)
+            case "Due Date":
+                return sorted(tasks, key=lambda task: task.due_date)
             case _:
-                sorted_tasks = tasks
+                return tasks  # Return tasks as is if no match
 
-        task_listbox.delete(0, tk.END)
-        for task in sorted_tasks:
-            task_listbox.insert(
-                tk.END,
-                f"{task.task_id} - {task.description} (Due: {task.due_date.strftime('%Y-%m-%d')}, Priority: {task.priority}, Status: {task.status})"
-            )
+class TaskPlannerGUI:
+    """Refactored GUI with more functional approach."""
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Functional Task Planner")
+        
+        # Tasks storage
+        self.tasks = TaskManager.load_tasks()
+        
+        # Setup UI components
+        self.setup_ui()
 
-    def create_task_controls(root, add_task_handler, delete_task_handler, update_task_handler, sort_tasks_by_criteria, filter_tasks_by_status):
-        # Add Task Button
-        add_button = tk.Button(root, text="Add Task", command=add_task_handler)
-        add_button.grid(row=6, column=0, padx=10, pady=10)
+    def setup_ui(self):
+        """Modular UI setup with functional principles."""
+        # Create UI components
+        self.create_input_fields()
+        self.create_task_list()
+        self.create_control_buttons()
+        self.refresh_task_list()
 
-        # Delete Task Button
-        delete_button = tk.Button(root, text="Delete Task", command=delete_task_handler)
-        delete_button.grid(row=7, column=0, padx=10, pady=10)
+    def create_input_fields(self):
+        """Functional approach to creating input fields."""
+        fields = [
+            ("Task Description:", "description"),
+            ("Due Date (YYYY-MM-DD):", "due_date"),
+            ("Priority:", "priority")
+        ]
+        
+        self.entries = {}
+        for row, (label_text, key) in enumerate(fields):
+            tk.Label(self.root, text=label_text).grid(row=row*2, column=1, sticky="W", padx=10, pady=5)
+            entry = tk.Entry(self.root)
+            entry.grid(row=row*2+1, column=1, padx=10, pady=5)
+            self.entries[key] = entry
 
-        # Update Task Button
-        update_button = tk.Button(root, text="Update Task", command=update_task_handler)
-        update_button.grid(row=8, column=0, padx=10, pady=10)
+    def create_task_list(self):
+        """Create task listbox with functional principles."""
+        self.task_listbox = tk.Listbox(self.root, width=50)
+        self.task_listbox.grid(row=0, column=0, padx=10, pady=10, rowspan=6)
 
-        # Sort dropdown menu
-        sort_var = tk.StringVar(root)
-        sort_var.set("Sort by")  # Set initial label (won't change after selection)
+    def create_control_buttons(self):
+        """Create control buttons with functional approach."""
+        buttons = [
+            ("Add Task", self.add_task_handler),
+            ("Delete Task", self.delete_task_handler),
+            ("Update Task", self.update_task_handler)
+        ]
+        
+        for index, (text, command) in enumerate(buttons):
+            btn = tk.Button(self.root, text=text, command=command)
+            btn.grid(row=6+index, column=0, padx=10, pady=10)
+
+        # Sort and Filter Dropdowns
+        self.create_sort_filter_dropdowns()
+
+    def create_sort_filter_dropdowns(self):
+        """Dropdown creation using updated filter_tasks and sort_tasks methods."""
+        # Sort options
+        sort_options = ["All", "Priority", "Due Date"]
+
+        # Filter options
+        filter_options = ["All", "Pending", "Completed", "Overdue"]
+
+        # Sort Dropdown
+        sort_var = tk.StringVar(self.root)
+        sort_var.set(sort_options[0])  # Default value: "Sort by"
         sort_dropdown = tk.OptionMenu(
-            root,
+            self.root,
             sort_var,
-            "ALL", "Sort by Priority", "Sort by Due Date",  # Sorting options
-            command=sort_tasks_by_criteria  # Pass the selected criteria to the handler
+            *sort_options,
+            command=lambda selection: self.apply_sort(selection)
         )
-        sort_var.set("Sort by")
         sort_dropdown.grid(row=6, column=1, padx=10, pady=10)
 
-
-        # Filter dropdown menu
-        filter_var = tk.StringVar(root)
-        filter_var.set("Filter by Status")  # Set initial label (won't change after selection)
+        # Filter Dropdown
+        filter_var = tk.StringVar(self.root)
+        filter_var.set(filter_options[0])  # Default value: "All"
         filter_dropdown = tk.OptionMenu(
-            root,
+            self.root,
             filter_var,
-            "All", "Filter by Pending", "Filter by Completed", "Filter by Overdue",  # Filtering options
-            command=filter_tasks_by_status  # Pass the selected status to the handler
+            *filter_options,
+            command=lambda selection: self.apply_filter(selection)
         )
         filter_dropdown.grid(row=7, column=1, padx=10, pady=10)
 
-    # Create task controls on the UI
-    create_task_controls(root, add_task_handler, delete_task_handler, update_task_handler, sort_tasks_by_criteria, filter_tasks_by_status)
 
-    # Initial task list
-    refresh_task_list()
 
-    root.mainloop()
+    def apply_sort(self, sort_by: str):
+        """Apply sorting to tasks based on user selection."""
+        if sort_by == "All":  # Default or no sorting
+            self.tasks = TaskManager.load_tasks()
+        else:
+            self.tasks = TaskManager.sort_tasks(self.tasks, sort_by)
+        self.refresh_task_list()
 
+    def apply_filter(self, filter_by: str):
+        """Apply filtering to tasks based on user selection."""
+        if filter_by == "All":  # Default or no filtering
+            self.tasks = TaskManager.load_tasks()
+        else:
+            self.tasks = TaskManager.filter_tasks(TaskManager.load_tasks(), filter_by)
+        self.refresh_task_list()
+
+
+    def refresh_task_list(self):
+        """Functional task list refresh."""
+        self.task_listbox.delete(0, tk.END)
+        for task in self.tasks:
+            self.task_listbox.insert(
+                tk.END, 
+                f"{task.task_id} - {task.description} (Due: {task.due_date.strftime('%Y-%m-%d')}, Priority: {task.priority}, Status: {task.status})"
+            )
+
+    def add_task_handler(self):
+        """Functional task addition handler."""
+        try:
+            description = self.entries['description'].get()
+            due_date = datetime.strptime(self.entries['due_date'].get(), "%Y-%m-%d")
+            priority = int(self.entries['priority'].get())
+            
+            # Functional task addition
+            self.tasks, new_task = TaskManager.add_task(self.tasks, description, due_date, priority)
+            
+            if new_task:
+                # Clear input fields
+                for entry in self.entries.values():
+                    entry.delete(0, tk.END)
+                
+                self.refresh_task_list()
+            else:
+                messagebox.showerror("Error", "Invalid task parameters!")
+        
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+
+    def delete_task_handler(self):
+        """Functional task deletion handler."""
+        selected = self.task_listbox.curselection()
+        if selected:
+            task_id = self.tasks[selected[0]].task_id
+            self.tasks = TaskManager.delete_task(self.tasks, task_id)
+            self.refresh_task_list()
+
+    def update_task_handler(self):
+        """Functional task update handler."""
+        selected = self.task_listbox.curselection()
+        if not selected:
+            messagebox.showerror("Error", "No task selected!")
+            return
+
+        task_id = self.tasks[selected[0]].task_id
+        update_window = tk.Toplevel(self.root)
+        update_window.title("Update Task")
+
+        # Create update fields dynamically
+        update_entries = {}
+        update_fields = [
+            ("Update Description", "description", str),
+            ("Update Due Date (YYYY-MM-DD)", "due_date", lambda x: datetime.strptime(x, "%Y-%m-%d")),
+            ("Update Priority", "priority", int)
+        ]
+
+        for row, (label_text, key, converter) in enumerate(update_fields):
+            tk.Label(update_window, text=label_text).grid(row=row, column=0, sticky="W", padx=10, pady=5)
+            entry = tk.Entry(update_window, width=30)
+            entry.grid(row=row, column=1, padx=10, pady=5)
+            update_entries[key] = (entry, converter)
+
+        # Status dropdown
+        status_var = tk.StringVar(update_window)
+        status_var.set("Select Status")
+        status_dropdown = tk.OptionMenu(update_window, status_var, "Pending", "Completed", "Overdue")
+        status_dropdown.grid(row=len(update_fields), column=1, padx=10, pady=5)
+
+        def submit_update():
+            updates = {}
+            for key, (entry, converter) in update_entries.items():
+                value = entry.get().strip()
+                if value:
+                    try:
+                        updates[key] = converter(value)
+                    except ValueError:
+                        messagebox.showerror("Error", f"Invalid {key} format!")
+                        return
+
+            if status_var.get() != "Select Status":
+                updates["status"] = status_var.get()
+
+            if not updates:
+                messagebox.showerror("Error", "No updates provided!")
+                return
+
+            self.tasks, _ = TaskManager.update_task(self.tasks, task_id, updates)
+            self.refresh_task_list()
+            update_window.destroy()
+
+        tk.Button(update_window, text="Submit Update", command=submit_update).grid(
+            row=len(update_fields)+1, column=0, columnspan=2, pady=10
+        )
+
+    def run(self):
+        """Start the GUI event loop."""
+        self.root.mainloop()
+
+def main():
+    """Main entry point with functional design."""
+    TaskPlannerGUI().run()
 
 if __name__ == "__main__":
-    run_task_planner_gui()
+    main()

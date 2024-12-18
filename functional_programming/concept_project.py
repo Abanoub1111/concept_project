@@ -49,7 +49,7 @@ class TaskManager:
         tasks.append(new_task)
         return tasks, new_task
 
-    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any]) -> Tuple[List[Task], Task]:
+    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any], replace_function) -> Tuple[List[Task], Task]:
         
         def update_recursively(tasks, task_id, updates, index=0, updated_task=None):
             # Base case
@@ -60,7 +60,7 @@ class TaskManager:
             current_task = tasks[0]
             if current_task.task_id == task_id:
                 # Apply the updates if task_id matches
-                updated_task = custom_replace(
+                updated_task = replace_function(
                     current_task,
                     description=updates.get("description", current_task.description),
                     due_date=updates.get("due_date", current_task.due_date),
@@ -132,12 +132,12 @@ class TaskManager:
         # Start the recursion with the full list of tasks
         return filter_recursively(tasks, filter_by)
 
-    def sort_tasks(tasks: List[Task], sort_by: str) -> List[Task]:
+    def sort_tasks(tasks: List[Task], sort_function, sort_by: str) -> List[Task]:
         match sort_by:
             case "Priority":
-                return my_sorted(tasks, key=lambda task: task.priority)
+                return sort_function(tasks, key=lambda task: task.priority)
             case "Due Date":
-                return my_sorted(tasks, key=lambda task: task.due_date)
+                return sort_function(tasks, key=lambda task: task.due_date)
             case _:
                 return tasks
 
@@ -209,12 +209,12 @@ class TaskManager:
         
         return True, "Task is valid"
 
-    def renumber_tasks(tasks: List[Task], index: int = 0) -> None:
+    def renumber_tasks(tasks: List[Task], replace_function, index: int = 0) -> None:
         if index == len(tasks):  # Base case
             return tasks
-        task = custom_replace(tasks[index], task_id=f"T{index + 1}")
+        task = replace_function(tasks[index], task_id=f"T{index + 1}")
         tasks[index] = task  # Update the task in the list
-        TaskManager.renumber_tasks(tasks, index + 1)  # Recursively renumber the next task
+        TaskManager.renumber_tasks(tasks, custom_replace, index + 1)  # Recursively renumber the next task
 
 
 class TaskPlannerGUI:
@@ -303,7 +303,7 @@ class TaskPlannerGUI:
         if sort_by == "All":  # Default or no sorting
             self.tasks = TaskManager.load_tasks()
         else:
-            self.tasks = TaskManager.sort_tasks(self.tasks, sort_by)
+            self.tasks = TaskManager.sort_tasks(self.tasks, my_sorted, sort_by)
         self.refresh_task_list()
 
     def apply_filter(self, filter_by: str):
@@ -331,7 +331,7 @@ class TaskPlannerGUI:
             if(TaskManager.validate_task(priority, due_date)[0]):
                 self.tasks, new_task = TaskManager.add_task(self.tasks, description, due_date, priority)
                 TaskManager.save_tasks(self.tasks)
-                TaskManager.renumber_tasks(self.tasks)
+                TaskManager.renumber_tasks(self.tasks, custom_replace)
                 if new_task:
                     # Clear input fields
                     for entry in self.entries.values():
@@ -352,7 +352,7 @@ class TaskPlannerGUI:
             task_id = self.tasks[selected[0]].task_id
             self.tasks = TaskManager.delete_task(self.tasks, task_id)
             TaskManager.save_tasks(self.tasks)
-            TaskManager.renumber_tasks(self.tasks)
+            TaskManager.renumber_tasks(self.tasks, custom_replace)
             self.refresh_task_list()
 
     def update_task_handler(self):
@@ -403,7 +403,7 @@ class TaskPlannerGUI:
                 messagebox.showerror("Error", "No updates provided!")
                 return
 
-            self.tasks, _ = TaskManager.update_task(self.tasks, task_id, updates)
+            self.tasks, _ = TaskManager.update_task(self.tasks, task_id, updates, custom_replace)
             TaskManager.save_tasks(self.tasks)
             self.refresh_task_list()
             update_window.destroy()

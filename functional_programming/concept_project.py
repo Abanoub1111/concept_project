@@ -1,7 +1,7 @@
 import os
 import json
-from dataclasses import dataclass, replace
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import List, Dict
 from datetime import datetime
 import tkinter as tk
 import tkinter.messagebox as messagebox
@@ -21,8 +21,17 @@ def my_sorted(iterable, key=None):
         return bubble_sort(arr, n, i + 1)
     return bubble_sort(iterable[:], len(iterable))  # Start sorting with a copy of the original list
 
+def custom_replace(obj, **kwargs):
+    class_name = type(obj)
+    updated_object = class_name(**{
+        key: kwargs.get(key, getattr(obj, key))
+        for key in obj.__dict__
+    })
 
-@dataclass(frozen=True)
+    return updated_object
+
+
+@dataclass
 class Task:
     task_id: str
     description: str
@@ -32,24 +41,15 @@ class Task:
 
 
 class TaskManager:
-    TASKS_FILE = "tasks.json"
+    TASKS_FILE = "D:/year 4 term 1/concept/project/functional_programming/tasks.json"
 
-    def add_task(tasks: List[Task], description: str, due_date: datetime, priority: int) -> Tuple[List[Task], Optional[Task]]:
+    def add_task(tasks: List[Task], description: str, due_date: datetime, priority: int) -> Tuple[List[Task], Task]:
         new_task = Task(f"T{len(tasks) + 1}", description, due_date, priority)
-        
-        # Validate the task
-        validation_error = TaskManager.validate_task(new_task)
-        if validation_error:
-            return tasks, None
-
         # Add task to the list
         tasks.append(new_task)
-        TaskManager.renumber_tasks(tasks)
-        TaskManager.save_tasks(tasks)
-        
         return tasks, new_task
 
-    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any]) -> Tuple[List[Task], Optional[Task]]:
+    def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any]) -> Tuple[List[Task], Task]:
         
         def update_recursively(tasks, task_id, updates, index=0, updated_task=None):
             # Base case
@@ -60,7 +60,7 @@ class TaskManager:
             current_task = tasks[0]
             if current_task.task_id == task_id:
                 # Apply the updates if task_id matches
-                updated_task = replace(
+                updated_task = custom_replace(
                     current_task,
                     description=updates.get("description", current_task.description),
                     due_date=updates.get("due_date", current_task.due_date),
@@ -79,16 +79,14 @@ class TaskManager:
         # Start the recursion
         updated_tasks, updated_task = update_recursively(tasks, task_id, updates)
         
-        TaskManager.save_tasks(updated_tasks)
+        #TaskManager.save_tasks(updated_tasks)
         return updated_tasks, updated_task
 
-    def delete_task(tasks: List[Task], task_id: str) -> List[Task]:
+    def delete_task(tasks: List[Task], task_id: str) -> List[Task]: # removed renumber and save
         
         def delete_recursively(tasks, task_id, result=[]):
             # Base case
             if not tasks:
-                TaskManager.renumber_tasks(result)
-                TaskManager.save_tasks(result)
                 return result
 
             # Get the first task
@@ -143,8 +141,7 @@ class TaskManager:
             case _:
                 return tasks
 
-    def load_tasks() -> List[Task]:
-        """Purely functional task loading with error handling using recursion."""
+    def load_tasks() -> List[Task]: #convert to list of tasks
         try:
             if not os.path.exists(TaskManager.TASKS_FILE):
                 return []
@@ -203,19 +200,19 @@ class TaskManager:
         with open(TaskManager.TASKS_FILE, 'w') as f:
             json.dump(task_dicts, f, indent=2)
 
-    def validate_task(task: Task) -> Optional[str]:
-        if task.priority < 1 or task.priority > 10:
-            return "Priority must be between 1 and 10!"
+    def validate_task(priority: int, due_date: datetime) -> Tuple[bool, str]:
+        if priority < 1 or priority > 10:
+            return False, "Priority must be between 1 and 10!"
         
-        if task.due_date <= datetime.now():
-            return "Due date must be in the future!"
+        if due_date <= datetime.now():
+            return False, "Due date must be in the future!"
         
-        return None
+        return True, "Task is valid"
 
     def renumber_tasks(tasks: List[Task], index: int = 0) -> None:
         if index == len(tasks):  # Base case
-            return
-        task = replace(tasks[index], task_id=f"T{index + 1}")
+            return tasks
+        task = custom_replace(tasks[index], task_id=f"T{index + 1}")
         tasks[index] = task  # Update the task in the list
         TaskManager.renumber_tasks(tasks, index + 1)  # Recursively renumber the next task
 
@@ -233,7 +230,6 @@ class TaskPlannerGUI:
         self.setup_ui()
 
     def setup_ui(self):
-        """Modular UI setup with functional principles."""
         # Create UI components
         self.create_input_fields()
         self.create_task_list()
@@ -241,7 +237,6 @@ class TaskPlannerGUI:
         self.refresh_task_list()
 
     def create_input_fields(self):
-        """Functional approach to creating input fields."""
         fields = [
             ("Task Description:", "description"),
             ("Due Date (YYYY-MM-DD):", "due_date"),
@@ -256,12 +251,10 @@ class TaskPlannerGUI:
             self.entries[key] = entry
 
     def create_task_list(self):
-        """Create task listbox with functional principles."""
         self.task_listbox = tk.Listbox(self.root, width=50)
         self.task_listbox.grid(row=0, column=0, padx=10, pady=10, rowspan=6)
 
     def create_control_buttons(self):
-        """Create control buttons with functional approach."""
         buttons = [
             ("Add Task", self.add_task_handler),
             ("Delete Task", self.delete_task_handler),
@@ -322,7 +315,6 @@ class TaskPlannerGUI:
         self.refresh_task_list()
 
     def refresh_task_list(self):
-        """Functional task list refresh."""
         self.task_listbox.delete(0, tk.END)
         for task in self.tasks:
             self.task_listbox.insert(
@@ -331,37 +323,39 @@ class TaskPlannerGUI:
             )
 
     def add_task_handler(self):
-        """Functional task addition handler."""
         try:
             description = self.entries['description'].get()
             due_date = datetime.strptime(self.entries['due_date'].get(), "%Y-%m-%d")
             priority = int(self.entries['priority'].get())
             
-            # Functional task addition
-            self.tasks, new_task = TaskManager.add_task(self.tasks, description, due_date, priority)
-            
-            if new_task:
-                # Clear input fields
-                for entry in self.entries.values():
-                    entry.delete(0, tk.END)
+            if(TaskManager.validate_task(priority, due_date)[0]):
+                self.tasks, new_task = TaskManager.add_task(self.tasks, description, due_date, priority)
+                TaskManager.save_tasks(self.tasks)
+                TaskManager.renumber_tasks(self.tasks)
+                if new_task:
+                    # Clear input fields
+                    for entry in self.entries.values():
+                        entry.delete(0, tk.END)
                 
-                self.refresh_task_list()
+                    self.refresh_task_list()
+                else:
+                    messagebox.showerror("Error", "Invalid task parameters!")
             else:
-                messagebox.showerror("Error", "Invalid task parameters!")
+                messagebox.showerror("Error", TaskManager.validate_task(priority, due_date)[1])
         
         except ValueError as e:
             messagebox.showerror("Error", str(e))
 
     def delete_task_handler(self):
-        """Functional task deletion handler."""
         selected = self.task_listbox.curselection()
         if selected:
             task_id = self.tasks[selected[0]].task_id
             self.tasks = TaskManager.delete_task(self.tasks, task_id)
+            TaskManager.save_tasks(self.tasks)
+            TaskManager.renumber_tasks(self.tasks)
             self.refresh_task_list()
 
     def update_task_handler(self):
-        """Functional task update handler."""
         selected = self.task_listbox.curselection()
         if not selected:
             messagebox.showerror("Error", "No task selected!")
@@ -410,6 +404,7 @@ class TaskPlannerGUI:
                 return
 
             self.tasks, _ = TaskManager.update_task(self.tasks, task_id, updates)
+            TaskManager.save_tasks(self.tasks)
             self.refresh_task_list()
             update_window.destroy()
 

@@ -45,9 +45,8 @@ class TaskManager:
 
     def add_task(tasks: List[Task], description: str, due_date: datetime, priority: int) -> Tuple[List[Task], Task]:
         new_task = Task(f"T{len(tasks) + 1}", description, due_date, priority)
-        # Add task to the list
-        tasks.append(new_task)
-        return tasks, new_task
+        # Create a new list with the added task
+        return tasks + [new_task], new_task
 
     def update_task(tasks: List[Task], task_id: str, updates: Dict[str, any], replace_function) -> Tuple[List[Task], Task]:
         
@@ -68,8 +67,7 @@ class TaskManager:
                     status=updates.get("status", current_task.status)
                 )
                 # Update the task in the list
-                tasks[0] = updated_task
-                return tasks, updated_task  # Return the updated tasks and task
+                return [updated_task] + tasks[1:], updated_task
             
             # Recurse on the rest of the list
             updated_tasks, updated_task = update_recursively(tasks[1:], task_id, updates, index + 1, updated_task)
@@ -94,40 +92,36 @@ class TaskManager:
 
             # If task_id doesn't match, keep the task in the result
             if task.task_id != task_id:
-                result.append(task)
+                return [task] + delete_recursively(tasks[1:], task_id)
 
             # Recurse with the remaining tasks
-            return delete_recursively(tasks[1:], task_id, result)
+            return delete_recursively(tasks[1:], task_id)
 
         # Start the recursion with the full list of tasks
         return delete_recursively(tasks, task_id)
 
     def filter_tasks(tasks: List[Task], filter_by: str) -> List[Task]:
         
-        def filter_recursively(tasks, filter_by, filtered_tasks=[]):
+        def filter_recursively(tasks, filter_by):
             # Base case
             if not tasks:
-                return filtered_tasks
+                return []
 
             # Get the first task
             task = tasks[0]
 
             # Apply the filter criteria
+            filtered_tasks = filter_recursively(tasks[1:], filter_by)
+            
             match filter_by:
                 case "Pending":
-                    if task.status == "Pending":
-                        filtered_tasks.append(task)
+                    return [task] + filtered_tasks if task.status == "Pending" else filtered_tasks
                 case "Completed":
-                    if task.status == "Completed":
-                        filtered_tasks.append(task)
+                    return [task] + filtered_tasks if task.status == "Completed" else filtered_tasks
                 case "Overdue":
-                    if task.status == "Overdue":
-                        filtered_tasks.append(task)
+                    return [task] + filtered_tasks if task.status == "Overdue" else filtered_tasks
                 case _:
-                    filtered_tasks.append(task)  # Return all tasks if no match
-
-            # Recursively process the rest of the tasks
-            return filter_recursively(tasks[1:], filter_by, filtered_tasks)
+                    return [task] + filtered_tasks  # Return all tasks if no match
 
         # Start the recursion with the full list of tasks
         return filter_recursively(tasks, filter_by)
@@ -190,7 +184,7 @@ class TaskManager:
                 "status": task.status
             }
 
-            # Recurse on the remaining tasks, appending the current task's dictionary
+            # Recurse on the remaining tasks
             return build_task_dicts(tasks[1:], task_dicts + [task_dict])
 
         # Start the recursion

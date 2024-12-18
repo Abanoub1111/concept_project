@@ -6,79 +6,79 @@ import tkinter.messagebox as messagebox
 
 TASKS_FILE = "D:/year 4 term 1/concept/project/functional_programming/tasks.json"
 
-def my_sorted(iterable, key=None):
-    for i in range(len(iterable)):
-        for j in range(len(iterable) - i - 1):
-            if (key(iterable[j]) if key else iterable[j]) > (key(iterable[j + 1]) if key else iterable[j + 1]):
-                iterable[j], iterable[j + 1] = iterable[j + 1], iterable[j]
-    return iterable
-
 def load_tasks():
     try:
         if not os.path.exists(TASKS_FILE):
             return []
         with open(TASKS_FILE, 'r') as f:
-            task_dicts = json.load(f)
-            tasks = []
-            for task_dict in task_dicts:
-                task = {
-                    "task_id": task_dict["task_id"],
-                    "description": task_dict["description"],
-                    "due_date": datetime.strptime(task_dict["due_date"], "%Y-%m-%d %H:%M:%S"),
-                    "priority": task_dict["priority"],
-                    "status": task_dict["status"]
-                }
-                tasks.append(task)
-            return tasks
-    except (json.JSONDecodeError, KeyError, FileNotFoundError):
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
         return []
 
 def save_tasks(tasks):
-    task_dicts = []
-    for task in tasks:
-        task_dict = {
-            "task_id": task["task_id"],
-            "description": task["description"],
-            "due_date": task["due_date"].strftime("%Y-%m-%d %H:%M:%S"),
-            "priority": task["priority"],
-            "status": task["status"]
-        }
-        task_dicts.append(task_dict)
     with open(TASKS_FILE, 'w') as f:
-        json.dump(task_dicts, f, indent=2)
+        json.dump(tasks, f, indent=2)
 
-def add_task(tasks, description, due_date, priority):
+def add_task(description, due_date, priority):
+    # Load existing tasks
+    tasks = load_tasks()
+    
+    # Create new task
     new_task = {
         "task_id": f"T{len(tasks) + 1}",
         "description": description,
-        "due_date": due_date,
+        "due_date": due_date.strftime("%Y-%m-%d %H:%M:%S"),
         "priority": priority,
         "status": "Pending"
     }
-    validation_error = validate_task(new_task)
-    if validation_error:
-        return tasks, None
-    tasks.append(new_task)
-    renumber_tasks(tasks)
-    save_tasks(tasks)
-    return tasks, new_task
+    # Validate task
+    if validate_task(new_task):
+        # Directly modify the JSON file
+        tasks.append(new_task)
+        save_tasks(tasks)
+        return new_task
+    return None
 
-def update_task(tasks, task_id, updates):
-    for i, task in enumerate(tasks):
-        if task["task_id"] == task_id:
-            updated_task = {**task, **updates}
-            tasks[i] = updated_task
+def update_task(task_id, updates):
+    # Load existing tasks
+    tasks = load_tasks()
+    
+    # Find and update the task
+    for task in tasks:
+        if task['task_id'] == task_id:
+            # Update task fields
+            for key, value in updates.items():
+                if key == 'due_date':
+                    # Convert datetime to string if needed
+                    task[key] = value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime) else value
+                else:
+                    task[key] = value
+            
+            # Directly save changes to JSON
             save_tasks(tasks)
-            return tasks, updated_task
-    return tasks, None
+            return task
+    
+    return None
 
-def delete_task(tasks, task_id):
-    tasks = [task for task in tasks if task["task_id"] != task_id]
-    renumber_tasks(tasks)
+def delete_task(task_id):
+    # Load existing tasks
+    tasks = load_tasks()
+    
+    # Remove the task
+    tasks = [task for task in tasks if task['task_id'] != task_id]
+    
+    # Renumber tasks
+    for i, task in enumerate(tasks, 1):
+        task['task_id'] = f"T{i}"
+    
+    # Directly save changes to JSON
     save_tasks(tasks)
+    
     return tasks
 
-def filter_tasks(tasks, filter_by):
+def filter_tasks(filter_by):
+    tasks = load_tasks()
+    
     if filter_by == "Pending":
         return [task for task in tasks if task["status"] == "Pending"]
     elif filter_by == "Completed":
@@ -87,32 +87,35 @@ def filter_tasks(tasks, filter_by):
         return [task for task in tasks if task["status"] == "Overdue"]
     return tasks
 
-def sort_tasks(tasks, sort_by):
+def sort_tasks(sort_by):
+    tasks = load_tasks()
+    
     if sort_by == "Priority":
-        return my_sorted(tasks, key=lambda task: task["priority"])
+        return sorted(tasks, key=lambda task: task["priority"])
     elif sort_by == "Due Date":
-        return my_sorted(tasks, key=lambda task: task["due_date"])
+        return sorted(tasks, key=lambda task: datetime.strptime(task["due_date"], "%Y-%m-%d %H:%M:%S"))
     return tasks
 
 def validate_task(task):
+    # Convert due_date to datetime if it's a string
+    if isinstance(task["due_date"], str):
+        task["due_date"] = datetime.strptime(task["due_date"], "%Y-%m-%d %H:%M:%S")
+    
+    # Validate priority
     if task["priority"] < 1 or task["priority"] > 10:
-        return "Priority must be between 1 and 10!"
+        return False
+    
+    # Validate due date
     if task["due_date"] <= datetime.now():
-        return "Due date must be in the future!"
-    return None
-
-def renumber_tasks(tasks):
-    for i, task in enumerate(tasks):
-        task["task_id"] = f"T{i + 1}"
+        return False
+    
+    return True
 
 
 class TaskPlannerGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Task Planner")
-        
-        # Tasks storage
-        self.tasks = load_tasks()
         
         # Setup UI components
         self.setup_ui()
@@ -189,26 +192,32 @@ class TaskPlannerGUI:
     def apply_sort(self, sort_by: str):
         """Apply sorting to tasks based on user selection."""
         if sort_by == "All":  # Default or no sorting
-            self.tasks = load_tasks()
+            self.refresh_task_list()
         else:
-            self.tasks = sort_tasks(self.tasks, sort_by)
-        self.refresh_task_list()
+            tasks = sort_tasks(sort_by)
+            self.update_task_listbox(tasks)
 
     def apply_filter(self, filter_by: str):
         """Apply filtering to tasks based on user selection."""
         if filter_by == "All":  # Default or no filtering
-            self.tasks = load_tasks()
+            self.refresh_task_list()
         else:
-            self.tasks = filter_tasks(load_tasks(), filter_by)
-        self.refresh_task_list()
+            tasks = filter_tasks(filter_by)
+            self.update_task_listbox(tasks)
 
-    def refresh_task_list(self):
+    def update_task_listbox(self, tasks):
+        """Update task listbox with given tasks."""
         self.task_listbox.delete(0, tk.END)
-        for task in self.tasks:
+        for task in tasks:
             self.task_listbox.insert(
                 tk.END, 
-                f"{task['task_id']} - {task['description']} (Due: {task['due_date'].strftime('%Y-%m-%d')}, Priority: {task['priority']}, Status: {task['status']})"
+                f"{task['task_id']} - {task['description']} (Due: {task['due_date']}, Priority: {task['priority']}, Status: {task['status']})"
             )
+
+    def refresh_task_list(self):
+        """Refresh task list from JSON file."""
+        tasks = load_tasks()
+        self.update_task_listbox(tasks)
 
     def add_task_handler(self):
         try:
@@ -216,14 +225,13 @@ class TaskPlannerGUI:
             due_date = datetime.strptime(self.entries['due_date'].get(), "%Y-%m-%d")
             priority = int(self.entries['priority'].get())
             
-            new_task_tuple = add_task(self.tasks, description, due_date, priority)
-            if new_task_tuple[1]:  # Check if task was successfully added
+            new_task = add_task(description, due_date, priority)
+            if new_task:
                 # Clear input fields
                 for entry in self.entries.values():
                     entry.delete(0, tk.END)
                 
-                # Reload tasks to ensure consistency
-                self.tasks = load_tasks()
+                # Refresh task list
                 self.refresh_task_list()
             else:
                 messagebox.showerror("Error", "Invalid task parameters!")
@@ -234,8 +242,9 @@ class TaskPlannerGUI:
     def delete_task_handler(self):
         selected = self.task_listbox.curselection()
         if selected:
-            task_id = self.tasks[selected[0]]['task_id']
-            self.tasks = delete_task(self.tasks, task_id)
+            tasks = load_tasks()
+            task_id = tasks[selected[0]]['task_id']
+            delete_task(task_id)
             self.refresh_task_list()
 
     def update_task_handler(self):
@@ -244,7 +253,8 @@ class TaskPlannerGUI:
             messagebox.showerror("Error", "No task selected!")
             return
 
-        task_id = self.tasks[selected[0]]['task_id']
+        tasks = load_tasks()
+        task_id = tasks[selected[0]]['task_id']
         update_window = tk.Toplevel(self.root)
         update_window.title("Update Task")
 
@@ -286,7 +296,7 @@ class TaskPlannerGUI:
                 messagebox.showerror("Error", "No updates provided!")
                 return
 
-            self.tasks, _ = update_task(self.tasks, task_id, updates)
+            update_task(task_id, updates)
             self.refresh_task_list()
             update_window.destroy()
 
